@@ -1,0 +1,13 @@
+{
+  "numeric": [
+    "rank_diff",
+    "age_diff",
+    "ht_diff",
+    "best_of",
+    "hand_match"
+  ],
+  "categorical": [
+    "surface",
+    "tourney_level"
+  ]
+}

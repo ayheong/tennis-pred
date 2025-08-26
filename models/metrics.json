@@ -1,0 +1,13 @@
+{
+  "logloss": 0.6484408509684322,
+  "auc": 0.6916980790141356,
+  "accuracy@0.50": 0.6408876933422999,
+  "accuracy@optJ": 0.6529926025554809,
+  "balanced_accuracy@optJ": 0.650770206596593,
+  "brier": 0.2280838198552858,
+  "best_threshold_optJ": 0.47265651662696734,
+  "best_iteration_mean": 44,
+  "n_train": 13375,
+  "n_val": 1487,
+  "n_models": 5
+}

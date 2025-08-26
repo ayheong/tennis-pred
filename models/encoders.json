@@ -1,0 +1,15 @@
+{
+  "surface": [
+    "Clay",
+    "Grass",
+    "Hard"
+  ],
+  "tourney_level": [
+    "A",
+    "D",
+    "F",
+    "G",
+    "M",
+    "O"
+  ]
+}
