@@ -1,9 +1,11 @@
 # src/models/predict_names.py
-import json, joblib, numpy as np, pandas as pd, glob
-from pathlib import Path
+import json
+import numpy as np
+import pandas as pd
 from difflib import get_close_matches
+from pathlib import Path
 
-from src.features.build_features import apply_label_encoders, load_encoders, load_matches
+from src.features.build_features import apply_label_encoders, load_matches
 from src.models.predict import load_artifacts
 
 # resolve project paths
@@ -85,9 +87,11 @@ def _h2h_prior(df, a, b, as_of):
     # smoothed h2h rate
     d = df[df["tourney_date"] < as_of]
     ab = d[((d["winner_id"] == a) & (d["loser_id"] == b)) | ((d["winner_id"] == b) & (d["loser_id"] == a))]
-    if ab.empty: return 0.5, 0.5
-    a_wins, total = (ab["winner_id"] == a).sum(), len(ab)
-    a_rate = (a_wins + 1) / (total + 2)
+    if ab.empty:
+        return 0.5, 0.5
+    a_wins = (ab["winner_id"] == a).sum()
+    total = len(ab)
+    a_rate = a_wins / total
     return float(a_rate), float(1 - a_rate)
 
 def _h2h_counts(df, a, b, as_of, surface=None):
@@ -146,7 +150,7 @@ def _build_match_row(df, pid_a, pid_b, as_of, surface, best_of, level):
     }])
     return X, A, B, a_h2h, b_h2h
 
-def predict_by_names(name_a, name_b, surface="Hard", best_of=3, tourney_level="A", as_of=None):
+def predict_by_names(name_a, name_b, surface="Hard", best_of=3, tourney_level="auto", as_of=None):
     # load the same files used in training
     files = sorted(DATA_DIR.glob("atp_matches_202*.csv"))
     if not files: raise FileNotFoundError(f"no CSVs in {DATA_DIR}/atp_matches_202*.csv")
@@ -165,6 +169,9 @@ def predict_by_names(name_a, name_b, surface="Hard", best_of=3, tourney_level="A
     pid_a, disp_a = _resolve(name_a, name2id, all_names)
     pid_b, disp_b = _resolve(name_b, name2id, all_names)
 
+    if str(tourney_level) == "auto":
+        tourney_level = "S" if best_of == 5 else "A"
+
     # as-of date
     as_of = pd.to_datetime(as_of) if as_of else (df["tourney_date"].max() + pd.Timedelta(days=1))
 
@@ -181,7 +188,13 @@ def predict_by_names(name_a, name_b, surface="Hard", best_of=3, tourney_level="A
     p = float(np.mean([m.predict_proba(X_enc)[:,1] for m in models], axis=0))
     pick_is_A = p >= thr
 
-    # insights (use big for counts/form; it has all rows)
+    # insights
+    # h2h_all: total historical head-to-head
+    # h2h_surf: head-to-head filtered to the given surface
+    # recent_form:
+    #   wr10: win rate over last 10 matches (overall / on-surface)
+    #   wr365: win rate over last 365 days (overall / on-surface)
+    # player_info: snapshot of player metadata (rank, age, height, handedness)
     surf_key = _normalize_surface(surface)
     h2h_all  = _h2h_counts(big, pid_a, pid_b, as_of, surface=None)
     h2h_surf = _h2h_counts(big, pid_a, pid_b, as_of, surface=surf_key)
@@ -205,11 +218,13 @@ def predict_by_names(name_a, name_b, surface="Hard", best_of=3, tourney_level="A
         "pick_is_A": bool(pick_is_A),
         "insights": {
             "h2h_overall": {
-                "A_wins": h2h_all["a_wins"], "B_wins": h2h_all["b_wins"],
-                "total": h2h_all["total"], "A_rate_smoothed": round(a_h2h_rate, 3)
+                "A_wins": h2h_all["a_wins"],
+                "B_wins": h2h_all["b_wins"],
+                "total": h2h_all["total"]
             },
             "h2h_on_surface": {
-                "A_wins": h2h_surf["a_wins"], "B_wins": h2h_surf["b_wins"],
+                "A_wins": h2h_surf["a_wins"],
+                "B_wins": h2h_surf["b_wins"],
                 "total": h2h_surf["total"]
             },
             "recent_form": {

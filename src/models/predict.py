@@ -15,10 +15,10 @@ def load_artifacts():
         models = joblib.load(ensemble)
         if not isinstance(models, (list, tuple)):  # safety
             models = [models]
-        model_path_used = str(ensemble)
+        str(ensemble)
     elif single.exists():
         models = [joblib.load(single)]
-        model_path_used = str(single)
+        str(single)
     else:
         cwd = Path.cwd()
         raise FileNotFoundError(
