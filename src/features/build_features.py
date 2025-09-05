@@ -86,6 +86,8 @@ def _row_to_feature_dict(r: pd.Series, flip: bool) -> tuple[dict, int]:
         "surface":   str(r["surface"]),
         "tourney_level": str(r["tourney_level"]),
         "date":      r.get("tourney_date"),
+        "pid_a": int(r["winner_id"]),
+        "pid_b": int(r["loser_id"]),
     }
     y = 1  # winner perspective
 

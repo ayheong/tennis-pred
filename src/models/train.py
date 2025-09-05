@@ -12,30 +12,30 @@ from sklearn.metrics import (
 from src.features.build_features import (
     load_matches, dataframe_to_examples,
     fit_label_encoders, save_encoders,
-    NUM_DIFF_COLS, CAT_COLS
+    NUM_DIFF_COLS, CAT_COLS, apply_label_encoders
 )
 
 RANDOM_STATE = 42
 SEEDS = [42, 7, 99, 1234, 2025]
 
 if __name__ == "__main__":
-    print("Loading matches...")
     df = load_matches("data/raw/atp_matches_202*.csv")
-    print("Matches loaded:", df.shape)
+    df = df.sort_values("tourney_date").reset_index(drop=True)
 
-    print("Building features...")
     X_raw, y, w = dataframe_to_examples(df, flip_prob=0.5, random_state=RANDOM_STATE, half_life_days=365)
 
-    X_enc, encoders = fit_label_encoders(X_raw.copy())
-    for c in CAT_COLS:
-        if c in X_enc.columns:
-            X_enc[c] = X_enc[c].astype("category")
+    cut = int(len(X_raw) * (1 - 0.1))
+    X_raw_train, X_raw_val = X_raw.iloc[:cut], X_raw.iloc[cut:]
+    y_train, y_val = y.iloc[:cut], y.iloc[cut:]
+    w_train, w_val = w.iloc[:cut], w.iloc[cut:]
 
-    val_frac = 0.1
-    cut = int(len(X_enc) * (1 - val_frac))
-    X_train, y_train, w_train = X_enc.iloc[:cut], y.iloc[:cut], w.iloc[:cut]
-    X_val,   y_val,   w_val   = X_enc.iloc[cut:], y.iloc[cut:], w.iloc[cut:]
-    print(f"Sequential split → train: {len(X_train)}, val: {len(X_val)}")
+    X_train, encoders = fit_label_encoders(X_raw_train.copy())
+    X_val = X_raw_val.copy()
+    X_val = apply_label_encoders(X_val, encoders)
+
+    for c in CAT_COLS:
+        if c in X_train.columns: X_train[c] = X_train[c].astype("category")
+        if c in X_val.columns:   X_val[c] = X_val[c].astype("category")
 
     base_params = dict(
         objective="binary", metric="auc", n_estimators=2000,
