@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from pathlib import Path
 from difflib import get_close_matches
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -120,10 +119,10 @@ def _player_snapshot(df: pd.DataFrame, pid: int, as_of: pd.Timestamp) -> Dict[st
     """Recent static info for a player prior to as_of."""
     d = df[df["tourney_date"] < as_of]
     w, l = d[d["winner_id"] == pid], d[d["loser_id"] == pid]
-    rank = _latest_known(pd.concat([w["winner_rank"], l["loser_rank"]], ignore_index=True))
-    age  = _latest_known(pd.concat([w["winner_age"],  l["loser_age"]],  ignore_index=True))
-    ht   = _latest_known(pd.concat([w["winner_ht"],   l["loser_ht"]],   ignore_index=True))
-    hand = _latest_known(pd.concat([w["winner_hand"], l["loser_hand"]], ignore_index=True))
+    rank = _latest_known(np.r_[w["winner_rank"], l["loser_rank"]])
+    age = _latest_known(np.r_[w["winner_age"], l["loser_age"]])
+    ht = _latest_known(np.r_[w["winner_ht"], l["loser_ht"]])
+    hand = _latest_known(np.r_[w["winner_hand"], l["loser_hand"]])
     return {"rank": rank, "age": age, "ht": ht, "hand": hand}
 
 def _build_match_row(
