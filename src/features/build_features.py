@@ -78,24 +78,25 @@ def _row_to_feature_dict(r: pd.Series, flip: bool) -> tuple[dict, int]:
     hand_match = int(str(r.get("winner_hand","R")) == str(r.get("loser_hand","R")))
 
     feat = {
-        "rank_diff": rank_diff,
-        "age_diff":  age_diff,
-        "ht_diff":   ht_diff,
-        "hand_match": hand_match,
-        "best_of":   int(r["best_of"]),
-        "surface":   str(r["surface"]),
-        "tourney_level": str(r["tourney_level"]),
-        "date":      r.get("tourney_date"),
-        "pid_a": int(r["winner_id"]),
-        "pid_b": int(r["loser_id"]),
+        "rank_diff": rank_diff,  # winner - loser rank
+        "age_diff":  age_diff,  # winner - loser age
+        "ht_diff":   ht_diff,  # winner - loser height
+        "hand_match": hand_match,  # 1 if hands match, 0 otherwise
+        "best_of":   int(r["best_of"]),  # number of sets per match
+        "surface":   str(r["surface"]),  # hard, grass, clay, carpet
+        "tourney_level": str(r["tourney_level"]),  # S for majors, M for 1000s, A for other tour level, C for challengers, etc
+        "date":      r.get("tourney_date"),  # date of tourney
+        "pid_a": int(r["winner_id"]),  # unique id for player a
+        "pid_b": int(r["loser_id"]),  # unique id for player b
     }
     y = 1  # winner perspective
 
     if flip:
-        # invert numeric diffs
+        # invert diffs
         feat["rank_diff"] *= -1
         feat["age_diff"]  *= -1
         feat["ht_diff"]   *= -1
+        feat["pid_a"], feat["pid_b"] = feat["pid_b"], feat["pid_a"]
         y = 0
 
     return feat, y
