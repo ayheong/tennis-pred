@@ -4,41 +4,53 @@
   <meta charset="utf-8" />
   <title>Tennis Match Predictor</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>body{font-family:system-ui,Arial;margin:2rem;max-width:720px}</style>
+  <style>
+    :root { font-family: system-ui, Arial; }
+    body { margin: 2rem; max-width: 800px; }
+    .grid { display: grid; gap: 0.75rem; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 1rem; }
+    .winner { background: #f0fff4; border-color: #a3e6b1; }
+    .muted { color: #666; font-size: 0.92rem; }
+    label { display: block; margin: 0.5rem 0; }
+    input, select, button { padding: 0.4rem 0.6rem; }
+    button { cursor: pointer; }
+  </style>
 </head>
 <body>
   <h1>Tennis Match Predictor</h1>
-  <form id="f">
+
+  <form id="f" class="card">
     <label>Player A
       <input id="a" list="playersA" placeholder="Start typing a name…" required />
       <datalist id="playersA"></datalist>
-    </label><br/><br/>
+    </label>
 
     <label>Player B
       <input id="b" list="playersB" placeholder="Start typing a name…" required />
       <datalist id="playersB"></datalist>
-    </label><br/><br/>
+    </label>
 
     <label>Surface
       <select id="s">
         <option>Hard</option><option>Clay</option><option>Grass</option><option>Carpet</option>
       </select>
-    </label><br/><br/>
+    </label>
 
     <label>Best of
       <select id="bo"><option>3</option><option>5</option></select>
-    </label><br/><br/>
+    </label>
 
     <button>Predict</button>
   </form>
 
-  <pre id="out"></pre>
+  <div id="out" class="grid" style="margin-top:1rem;"></div>
 
   <script>
+    // Load static names for simple autocomplete
     let NAMES = [];
     fetch('/static/players.json')
-      .then(r => r.json())
-      .then(names => { NAMES = names; });
+      .then(r => r.ok ? r.json() : [])
+      .then(names => { NAMES = names || []; });
 
     function getSuggestions(query, limit = 12) {
       const q = query.trim().toLowerCase();
@@ -46,7 +58,7 @@
       const out = [];
       for (const name of NAMES) {
         const lower = name.toLowerCase();
-        const tokens = lower.split(/\s+/); // e.g., ["novak","djokovic"]
+        const tokens = lower.split(/\s+/);
         if (lower.startsWith(q) || tokens.some(t => t.startsWith(q))) {
           out.push(name);
           if (out.length >= limit) break;
@@ -58,19 +70,72 @@
     function wireAutocomplete(inputId, listId) {
       const input = document.getElementById(inputId);
       const list  = document.getElementById(listId);
-
       let t = null;
       input.addEventListener('input', () => {
         clearTimeout(t);
         t = setTimeout(() => {
           const suggestions = getSuggestions(input.value);
           list.innerHTML = suggestions.map(n => `<option value="${n}"></option>`).join('');
-        }, 80); // tiny debounce
+        }, 80);
       });
     }
+    wireAutocomplete('a','playersA');
+    wireAutocomplete('b','playersB');
 
-    wireAutocomplete('a', 'playersA');
-    wireAutocomplete('b', 'playersB');
+    // Helper to format percentages
+    const pct = x => (x * 100).toFixed(1) + '%';
+    const fix1 = x => (typeof x === 'number' ? x.toFixed(1) : x);
+
+    function renderPrediction(d) {
+      const A = d.players.A, B = d.players.B;
+      const surf = d.inputs.surface;
+      const isAWinner = d.pick === A;
+      const pa = d.prob_A_wins;
+
+      const rf = d.insights.recent_form;
+      const h2hO = d.insights.h2h_overall;
+      const h2hS = d.insights.h2h_on_surface;
+      const piA = d.insights.player_info.A;
+      const piB = d.insights.player_info.B;
+
+      const A_wr10_surf = rf[`A_wr10_${surf}`];
+      const B_wr10_surf = rf[`B_wr10_${surf}`];
+      const A_wr365_surf = rf[`A_wr365_${surf}`];
+      const B_wr365_surf = rf[`B_wr365_${surf}`];
+
+      return `
+        <div class="card ${isAWinner ? 'winner' : ''}">
+          <h2 style="margin-top:0;">Prediction</h2>
+          <div><strong>${A}</strong> vs <strong>${B}</strong></div>
+          <div class="muted">Surface: ${surf} • Best of: ${d.inputs.best_of} • As of: ${d.as_of}</div>
+
+          <h3>Result</h3>
+          <p>
+            <strong>Predicted winner:</strong> ${d.pick}<br/>
+            <strong>Win probability for ${A}:</strong> ${pct(pa)}<br/>
+            <strong>Decision threshold used:</strong> ${d.threshold.toFixed(3)}
+          </p>
+
+          <h3>Head-to-Head</h3>
+          <ul>
+            <li><strong>Overall record:</strong> ${h2hO.A_wins}–${h2hO.B_wins} (total matches: ${h2hO.total})</li>
+            <li><strong>Record on ${surf}:</strong> ${h2hS.A_wins}–${h2hS.B_wins} (total matches: ${h2hS.total})</li>
+          </ul>
+
+          <h3>Recent Form</h3>
+          <ul>
+            <li><strong>${A}</strong> — Win rate (last 10 matches): ${pct(rf.A_wr10)}; on ${surf}: ${pct(A_wr10_surf)}; last 365 days (all surfaces): ${pct(rf.A_wr365_all)}; last 365 days on ${surf}: ${pct(A_wr365_surf)}</li>
+            <li><strong>${B}</strong> — Win rate (last 10 matches): ${pct(rf.B_wr10)}; on ${surf}: ${pct(B_wr10_surf)}; last 365 days (all surfaces): ${pct(rf.B_wr365_all)}; last 365 days on ${surf}: ${pct(B_wr365_surf)}</li>
+          </ul>
+
+          <h3>Player Details</h3>
+          <ul>
+            <li><strong>${A}</strong> — Rank: ${piA.rank}; Age: ${fix1(piA.age)}; Height: ${piA.ht} cm; Playing hand: ${piA.hand}</li>
+            <li><strong>${B}</strong> — Rank: ${piB.rank}; Age: ${fix1(piB.age)}; Height: ${piB.ht} cm; Playing hand: ${piB.hand}</li>
+          </ul>
+        </div>
+      `;
+    }
 
     document.getElementById('f').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -80,13 +145,22 @@
         surface: document.getElementById('s').value,
         best_of: parseInt(document.getElementById('bo').value, 10)
       };
-      const r = await fetch('/predict', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify(payload)
-      });
-      const data = await r.json();
-      document.getElementById('out').textContent = JSON.stringify(data, null, 2);
+      const out = document.getElementById('out');
+      out.innerHTML = '<div class="card">Running prediction…</div>';
+      try {
+        const r = await fetch('/predict', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || r.statusText);
+        out.innerHTML = renderPrediction(data);
+      } catch (err) {
+        out.innerHTML = `<div class="card" style="border-color:#f5b5b5;background:#fff5f5;">
+          <strong>Error:</strong> ${String(err.message || err)}
+        </div>`;
+      }
     });
   </script>
 </body>
