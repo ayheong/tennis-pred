@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Tennis Match Predictor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>body{font-family:system-ui,Arial;margin:2rem;max-width:720px}</style>
+</head>
+<body>
+  <h1>Tennis Match Predictor</h1>
+  <form id="f">
+    <label>Player A
+      <input id="a" list="playersA" placeholder="Start typing a name…" required />
+      <datalist id="playersA"></datalist>
+    </label><br/><br/>
+
+    <label>Player B
+      <input id="b" list="playersB" placeholder="Start typing a name…" required />
+      <datalist id="playersB"></datalist>
+    </label><br/><br/>
+
+    <label>Surface
+      <select id="s">
+        <option>Hard</option><option>Clay</option><option>Grass</option><option>Carpet</option>
+      </select>
+    </label><br/><br/>
+
+    <label>Best of
+      <select id="bo"><option>3</option><option>5</option></select>
+    </label><br/><br/>
+
+    <button>Predict</button>
+  </form>
+
+  <pre id="out"></pre>
+
+  <script>
+    let NAMES = [];
+    fetch('/static/players.json')
+      .then(r => r.json())
+      .then(names => { NAMES = names; });
+
+    function getSuggestions(query, limit = 12) {
+      const q = query.trim().toLowerCase();
+      if (!q) return [];
+      const out = [];
+      for (const name of NAMES) {
+        const lower = name.toLowerCase();
+        const tokens = lower.split(/\s+/); // e.g., ["novak","djokovic"]
+        if (lower.startsWith(q) || tokens.some(t => t.startsWith(q))) {
+          out.push(name);
+          if (out.length >= limit) break;
+        }
+      }
+      return out;
+    }
+
+    function wireAutocomplete(inputId, listId) {
+      const input = document.getElementById(inputId);
+      const list  = document.getElementById(listId);
+
+      let t = null;
+      input.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(() => {
+          const suggestions = getSuggestions(input.value);
+          list.innerHTML = suggestions.map(n => `<option value="${n}"></option>`).join('');
+        }, 80); // tiny debounce
+      });
+    }
+
+    wireAutocomplete('a', 'playersA');
+    wireAutocomplete('b', 'playersB');
+
+    document.getElementById('f').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const payload = {
+        name_a: document.getElementById('a').value,
+        name_b: document.getElementById('b').value,
+        surface: document.getElementById('s').value,
+        best_of: parseInt(document.getElementById('bo').value, 10)
+      };
+      const r = await fetch('/predict', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await r.json();
+      document.getElementById('out').textContent = JSON.stringify(data, null, 2);
+    });
+  </script>
+</body>
+</html>

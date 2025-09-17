@@ -1,4 +1,4 @@
-FROM python:3.11
+FROM python:3.12
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -11,6 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src ./src
 COPY data ./data
 COPY models ./models
+COPY static ./static
 
 RUN useradd -m app && chown -R app:app /app
 USER app

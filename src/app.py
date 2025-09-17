@@ -1,7 +1,10 @@
 # app.py
 from typing import Literal, Optional
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+
 from src.models.predict_names import predict_by_names
 
 app = FastAPI()
@@ -11,7 +14,7 @@ class PredictionRequest(BaseModel):
     name_b: str
     surface: Literal["Hard", "Clay", "Grass", "Carpet"] = "Hard"
     best_of: Literal[3, 5] = 3
-    tourney_level: str = "A"          # optional; passes through
+    tourney_level: str = "A"          # optional
     as_of: Optional[str] = None       # "YYYY-MM-DD" or None
 
 @app.post("/predict")
@@ -34,3 +37,9 @@ def predict(prediction_request: PredictionRequest):
 @app.get("/status")
 def status():
     return {"status": "ok :)"}
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
+def root():
+    return FileResponse("static/index.html")
