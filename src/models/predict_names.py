@@ -23,6 +23,8 @@ def _normalize_surface(s: object) -> str:
 
 def _latest_known(s: pd.Series) -> float | str | np.floating | np.integer | pd.Timestamp | np.nan:
     """Return last non-NA value (or NaN if none)."""
+    if not isinstance(s, pd.Series):
+        s = pd.Series(s)
     s = s.dropna()
     return s.iloc[-1] if len(s) else np.nan
 
