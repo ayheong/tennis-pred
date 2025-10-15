@@ -1,6 +1,21 @@
 # src/models/predict_names.py
 from __future__ import annotations
 
+"""
+Lightweight name-based tennis match predictor.
+
+Given two player names and minimal match context (surface, best-of, level, date),
+this module resolves player IDs from historical data, builds a small feature row,
+encodes it with the same label encoders used in training, runs an ensemble of
+models, and returns a JSON-serializable prediction payload (probabilities, pick,
+and a handful of interpretable insights like recent win rates and H2H counts).
+
+Dependencies expected from this project:
+- src.features.build_features.apply_label_encoders
+- src.features.build_features.load_matches
+- src.models.predict.load_artifacts
+"""
+
 import json
 from difflib import get_close_matches
 from pathlib import Path
@@ -16,20 +31,23 @@ from src.models.predict import load_artifacts
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "data" / "raw"
 
-# ---- Utilities --------------------------------------------------------
+
+# ---- Utilities --------------------------------------------------------------
 def _normalize_surface(s: object) -> str:
     """Normalize surface labels to Title case (e.g., 'Hard', 'Clay', 'Grass')."""
     return str(s).strip().title()
 
+
 def _latest_known(s: pd.Series) -> float | str | np.floating | np.integer | pd.Timestamp | np.nan:
-    """Return last non-NA value (or NaN if none)."""
+    """Return the last non-NA value from a series, or NaN if none."""
     if not isinstance(s, pd.Series):
         s = pd.Series(s)
     s = s.dropna()
     return s.iloc[-1] if len(s) else np.nan
 
+
 def _plays_for(df: pd.DataFrame, pid: int, as_of: pd.Timestamp) -> pd.DataFrame:
-    """Return matches before as_of for player id with basic flags."""
+    """Return rows before `as_of` where player `pid` appeared, with simple flags."""
     d = df[df["tourney_date"] < as_of].copy()
     d = d[(d["winner_id"] == pid) | (d["loser_id"] == pid)]
     if d.empty:
@@ -37,12 +55,19 @@ def _plays_for(df: pd.DataFrame, pid: int, as_of: pd.Timestamp) -> pd.DataFrame:
     d["is_win"] = (d["winner_id"] == pid).astype(int)
     if "surface_n" not in d.columns:
         d["surface_n"] = d["surface"].map(_normalize_surface)
-    # stable secondary sort to preserve original order within date
+    # Stable secondary sort to preserve original order within date
     d = d.reset_index().sort_values(["tourney_date", "index"], kind="mergesort")
     return d[["tourney_date", "surface_n", "is_win"]]
 
-def _wr_last_k(df: pd.DataFrame, pid: int, as_of: pd.Timestamp, k: int = 10, surface: Optional[str] = None) -> float:
-    """K-match recent win rate with simple shrinkage toward 0.5 when <k samples."""
+
+def _wr_last_k(
+    df: pd.DataFrame,
+    pid: int,
+    as_of: pd.Timestamp,
+    k: int = 10,
+    surface: Optional[str] = None,
+) -> float:
+    """K-match recent win rate with simple shrinkage toward 0.5 when < k samples."""
     p = _plays_for(df, pid, as_of)
     if p.empty:
         return 0.5
@@ -52,11 +77,18 @@ def _wr_last_k(df: pd.DataFrame, pid: int, as_of: pd.Timestamp, k: int = 10, sur
     n = len(tail)
     if n == 0:
         return 0.5
-    # shrink to 0.5 when fewer than k available
+    # Shrink to 0.5 when fewer than k available
     return float((tail.mean() * n + 0.5 * (k - n)) / k)
 
-def _wr_window_days(df: pd.DataFrame, pid: int, as_of: pd.Timestamp, days: int = 365, surface: Optional[str] = None) -> float:
-    """Windowed win rate over the last `days`."""
+
+def _wr_window_days(
+    df: pd.DataFrame,
+    pid: int,
+    as_of: pd.Timestamp,
+    days: int = 365,
+    surface: Optional[str] = None,
+) -> float:
+    """Windowed win rate over the last `days` days (optionally filtered by surface)."""
     p = _plays_for(df, pid, as_of)
     if p.empty:
         return 0.5
@@ -68,27 +100,43 @@ def _wr_window_days(df: pd.DataFrame, pid: int, as_of: pd.Timestamp, days: int =
         return 0.5
     return float(p["is_win"].mean())
 
+
 def _h2h_prior(df: pd.DataFrame, a: int, b: int, as_of: pd.Timestamp) -> Tuple[float, float]:
     """Smoothed H2H rate (Beta(1,1) prior). Returns (a_rate, b_rate)."""
     d = df[df["tourney_date"] < as_of]
-    ab = d[((d["winner_id"] == a) & (d["loser_id"] == b)) | ((d["winner_id"] == b) & (d["loser_id"] == a))]
+    ab = d[
+        ((d["winner_id"] == a) & (d["loser_id"] == b))
+        | ((d["winner_id"] == b) & (d["loser_id"] == a))
+    ]
     if ab.empty:
         return 0.5, 0.5
     a_wins, total = (ab["winner_id"] == a).sum(), len(ab)
     a_rate = (a_wins + 1) / (total + 2)
     return float(a_rate), float(1 - a_rate)
 
-def _h2h_counts(df: pd.DataFrame, a: int, b: int, as_of: pd.Timestamp, surface: Optional[str] = None) -> Dict[str, int]:
-    """Raw H2H counts overall or on a surface."""
+
+def _h2h_counts(
+    df: pd.DataFrame,
+    a: int,
+    b: int,
+    as_of: pd.Timestamp,
+    surface: Optional[str] = None,
+) -> Dict[str, int]:
+    """Raw H2H counts overall or on a given surface."""
     d = df[df["tourney_date"] < as_of]
     if surface is not None:
         d = d[d["surface_n"] == _normalize_surface(surface)]
-    ab = d[((d["winner_id"] == a) & (d["loser_id"] == b)) | ((d["winner_id"] == b) & (d["loser_id"] == a))]
-    a_w = int((ab["winner_id"] == a).sum()); b_w = int((ab["winner_id"] == b).sum())
+    ab = d[
+        ((d["winner_id"] == a) & (d["loser_id"] == b))
+        | ((d["winner_id"] == b) & (d["loser_id"] == a))
+    ]
+    a_w = int((ab["winner_id"] == a).sum())
+    b_w = int((ab["winner_id"] == b).sum())
     return {"a_wins": a_w, "b_wins": b_w, "total": int(len(ab))}
 
+
 def _build_name_maps(big: pd.DataFrame) -> Tuple[Dict[str, int], List[str]]:
-    """Build name→id map from a consolidated matches frame."""
+    """Build name→id map (preferring the most common name↔id pairing) and list of names."""
     df = big[["winner_name", "winner_id", "loser_name", "loser_id"]].copy()
     for col in ("winner_name", "loser_name"):
         df[col] = df[col].astype(str).str.strip()
@@ -107,8 +155,9 @@ def _build_name_maps(big: pd.DataFrame) -> Tuple[Dict[str, int], List[str]]:
     name2id = {n.lower(): int(i) for n, i in zip(best["name"], best["id"])}
     return name2id, list(best["name"])
 
+
 def _resolve_name(name: str, name2id: Dict[str, int], all_names: List[str]) -> Tuple[int, str]:
-    """Exact match first, then fuzzy via difflib with a reasonable cutoff."""
+    """Resolve a free-text player name to (player_id, canonical_display_name)."""
     key = name.strip().lower()
     if key in name2id:
         return name2id[key], name
@@ -117,8 +166,19 @@ def _resolve_name(name: str, name2id: Dict[str, int], all_names: List[str]) -> T
         return name2id[hit[0].lower()], hit[0]
     raise ValueError(f"Player not found: {name}")
 
+
+def _as_float_or_default(x: object, default: float = 0.0) -> float:
+    """Return float(x) if not NA, else default."""
+    return float(x) if pd.notna(x) else float(default)
+
+
+def _as_str_or_default(x: object, default: str = "") -> str:
+    """Return str(x) if not NA, else default."""
+    return str(x) if pd.notna(x) else default
+
+
 def _player_snapshot(df: pd.DataFrame, pid: int, as_of: pd.Timestamp) -> Dict[str, object]:
-    """Recent static info for a player prior to as_of."""
+    """Recent static info for a player prior to `as_of`."""
     d = df[df["tourney_date"] < as_of]
     w, l = d[d["winner_id"] == pid], d[d["loser_id"] == pid]
     rank = _latest_known(np.r_[w["winner_rank"], l["loser_rank"]])
@@ -126,6 +186,7 @@ def _player_snapshot(df: pd.DataFrame, pid: int, as_of: pd.Timestamp) -> Dict[st
     ht = _latest_known(np.r_[w["winner_ht"], l["loser_ht"]])
     hand = _latest_known(np.r_[w["winner_hand"], l["loser_hand"]])
     return {"rank": rank, "age": age, "ht": ht, "hand": hand}
+
 
 def _build_match_row(
     df: pd.DataFrame,
@@ -136,47 +197,47 @@ def _build_match_row(
     best_of: int,
     level: str,
 ) -> Tuple[pd.DataFrame, Dict[str, object], Dict[str, object], float, float]:
-    """Assemble one-row feature frame and auxiliary info."""
+    """Assemble a single-row feature frame and supporting info for A vs B."""
     A, B = _player_snapshot(df, pid_a, as_of), _player_snapshot(df, pid_b, as_of)
     a_h2h, b_h2h = _h2h_prior(df, pid_a, pid_b, as_of)
     A_wr10 = _wr_last_k(df, pid_a, as_of, k=10)
     B_wr10 = _wr_last_k(df, pid_b, as_of, k=10)
 
-    # Safely compute diffs (treat missing as 0)
-    rank_a = A["rank"] if pd.notna(A["rank"]) else 0
-    rank_b = B["rank"] if pd.notna(B["rank"]) else 0
-    rank_diff = float(rank_a - rank_b)
+    # Safe numeric/string conversions (avoid ambiguous truthiness with NaN)
+    rank_a = _as_float_or_default(A["rank"], 0.0)
+    rank_b = _as_float_or_default(B["rank"], 0.0)
+    rank_diff = rank_a - rank_b
 
-    age_diff  = float((A["age"] or 0) - (B["age"] or 0))
-    ht_diff   = float((A["ht"]  or 0) - (B["ht"]  or 0))
-    hand_match = int(str(A["hand"] or "R") == str(B["hand"] or "R"))
-    wr10_diff = float(A_wr10 - B_wr10)
-    h2h_prior_diff = float(a_h2h - b_h2h)
+    age_diff = _as_float_or_default(A["age"], 0.0) - _as_float_or_default(B["age"], 0.0)
+    ht_diff = _as_float_or_default(A["ht"], 0.0) - _as_float_or_default(B["ht"], 0.0)
+    hand_match = int(_as_str_or_default(A["hand"], "R") == _as_str_or_default(B["hand"], "R"))
+    wr10_diff = A_wr10 - B_wr10
+    h2h_prior_diff = a_h2h - b_h2h
 
     year = as_of.year
-    m = as_of.month
+    month = as_of.month
     X = pd.DataFrame(
         [
             {
-                "rank_diff": rank_diff,
-                "age_diff": age_diff,
-                "ht_diff": ht_diff,
-                "hand_match": hand_match,
+                "rank_diff": float(rank_diff),
+                "age_diff": float(age_diff),
+                "ht_diff": float(ht_diff),
+                "hand_match": int(hand_match),
                 "best_of": int(best_of),
                 "surface": str(surface),
                 "tourney_level": str(level),
-                "wr10_diff": wr10_diff,
-                "h2h_prior_diff": h2h_prior_diff,
-                "year": year,
-                "month_sin": float(np.sin(2 * np.pi * m / 12.0)),
-                "month_cos": float(np.cos(2 * np.pi * m / 12.0)),
+                "wr10_diff": float(wr10_diff),
+                "h2h_prior_diff": float(h2h_prior_diff),
+                "year": int(year),
+                "month_sin": float(np.sin(2 * np.pi * month / 12.0)),
+                "month_cos": float(np.cos(2 * np.pi * month / 12.0)),
             }
         ]
     )
-    return X, A, B, a_h2h, b_h2h
+    return X, A, B, float(a_h2h), float(b_h2h)
+
 
 # ---- Public API -------------------------------------------------------------
-
 def predict_by_names(
     name_a: str,
     name_b: str,
@@ -184,26 +245,30 @@ def predict_by_names(
     best_of: int = 3,
     tourney_level: str = "A",
     as_of: Optional[str] = None,
-) -> dict:
+) -> Dict[str, object]:
     """
     Predict match outcome A vs B with lightweight features & model ensemble.
 
-    Returns a JSON-serializable dict with probabilities, pick, and insights.
+    Returns:
+        Dict[str, object]: JSON-serializable payload including:
+            - players (display names)
+            - as_of date
+            - inputs (surface, best_of, tourney_level)
+            - prob_A_wins, threshold, pick, pick_is_A
+            - insights (H2H, recent form, player info)
     """
-    # Load data once, in two forms:
-    # 1) `df` used by feature builder (your engineered schema via load_matches)
-    # 2) `big` used for name maps / raw counts / recent form; keep only needed cols to save RAM
-    files = sorted((DATA_DIR).glob("atp_matches_202*.csv"))
+    # Locate historical CSVs
+    files = sorted((DATA_DIR).glob("atp_matches_*.csv"))
     if not files:
-        raise FileNotFoundError(f"no CSVs in {DATA_DIR}/atp_matches_202*.csv")
+        raise FileNotFoundError(f"No CSVs found matching {DATA_DIR}/atp_matches_*.csv")
     paths = [str(p) for p in files]
 
-    # Engineered (same as training)
+    # Engineered schema (as in training)
     df = load_matches(paths)
     df = df[df["tourney_date"] >= pd.Timestamp("2000-01-01")].copy()
 
-    # Lightweight raw view for names/H2H; parse only needed columns
-    use_cols = [
+    # Lightweight raw subset for names/H2H/recent form
+    use_cols = {
         "tourney_date",
         "surface",
         "winner_id", "loser_id",
@@ -212,9 +277,9 @@ def predict_by_names(
         "winner_age", "loser_age",
         "winner_ht", "loser_ht",
         "winner_hand", "loser_hand",
-    ]
+    }
     parts = [
-        pd.read_csv(p, low_memory=False, usecols=lambda c, _set=set(use_cols): c in _set)
+        pd.read_csv(p, low_memory=False, usecols=lambda c, _u=use_cols: c in _u)
         for p in paths
     ]
     big = pd.concat(parts, ignore_index=True)
@@ -226,10 +291,10 @@ def predict_by_names(
     pid_a, disp_a = _resolve_name(name_a, name2id, all_names)
     pid_b, disp_b = _resolve_name(name_b, name2id, all_names)
 
-    # as_of default: one day after the latest engineered row to ensure "past-only"
+    # Default as_of: one day after the latest engineered row to ensure "past-only"
     as_of_ts = pd.to_datetime(as_of) if as_of else (df["tourney_date"].max() + pd.Timedelta(days=1))
 
-    # Build features
+    # Build features for this hypothetical matchup
     X_row, A_snap, B_snap, a_h2h_rate, b_h2h_rate = _build_match_row(
         big, pid_a, pid_b, as_of_ts, surface, best_of, tourney_level
     )
@@ -246,24 +311,24 @@ def predict_by_names(
     p = float(np.mean(preds, axis=0))
     pick_is_A = p >= float(thr)
 
-    # Insights (use big which has all rows)
+    # Insights (computed on full raw subset)
     surf_key = _normalize_surface(surface)
-    h2h_all  = _h2h_counts(big, pid_a, pid_b, as_of_ts, surface=None)
+    h2h_all = _h2h_counts(big, pid_a, pid_b, as_of_ts, surface=None)
     h2h_surf = _h2h_counts(big, pid_a, pid_b, as_of_ts, surface=surf_key)
 
-    A_wr10       = _wr_last_k(big, pid_a, as_of_ts, k=10)
-    B_wr10       = _wr_last_k(big, pid_b, as_of_ts, k=10)
-    A_wr10_surf  = _wr_last_k(big, pid_a, as_of_ts, k=10, surface=surf_key)
-    B_wr10_surf  = _wr_last_k(big, pid_b, as_of_ts, k=10, surface=surf_key)
-    A_wr365_all  = _wr_window_days(big, pid_a, as_of_ts, days=365)
-    B_wr365_all  = _wr_window_days(big, pid_b, as_of_ts, days=365)
+    A_wr10 = _wr_last_k(big, pid_a, as_of_ts, k=10)
+    B_wr10 = _wr_last_k(big, pid_b, as_of_ts, k=10)
+    A_wr10_surf = _wr_last_k(big, pid_a, as_of_ts, k=10, surface=surf_key)
+    B_wr10_surf = _wr_last_k(big, pid_b, as_of_ts, k=10, surface=surf_key)
+    A_wr365_all = _wr_window_days(big, pid_a, as_of_ts, days=365)
+    B_wr365_all = _wr_window_days(big, pid_b, as_of_ts, days=365)
     A_wr365_surf = _wr_window_days(big, pid_a, as_of_ts, days=365, surface=surf_key)
     B_wr365_surf = _wr_window_days(big, pid_b, as_of_ts, days=365, surface=surf_key)
 
     return {
         "players": {"A": disp_a, "B": disp_b},
         "as_of": str(as_of_ts.date()),
-        "inputs": {"surface": surface, "best_of": best_of, "tourney_level": tourney_level},
+        "inputs": {"surface": surface, "best_of": int(best_of), "tourney_level": tourney_level},
         "prob_A_wins": p,
         "threshold": float(thr),
         "pick": disp_a if pick_is_A else disp_b,
@@ -291,21 +356,43 @@ def predict_by_names(
                 f"B_wr365_{surf_key}": round(B_wr365_surf, 3),
             },
             "player_info": {
-                "A": {"rank": A_snap["rank"], "age": A_snap["age"], "ht": A_snap["ht"], "hand": A_snap["hand"]},
-                "B": {"rank": B_snap["rank"], "age": B_snap["age"], "ht": B_snap["ht"], "hand": B_snap["hand"]},
+                "A": {
+                    "rank": A_snap["rank"],
+                    "age": A_snap["age"],
+                    "ht": A_snap["ht"],
+                    "hand": A_snap["hand"],
+                },
+                "B": {
+                    "rank": B_snap["rank"],
+                    "age": B_snap["age"],
+                    "ht": B_snap["ht"],
+                    "hand": B_snap["hand"],
+                },
             },
         },
     }
 
+
 # ---- CLI -------------------------------------------------------------------
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) < 3:
-        print("Usage: python -m src.models.predict_names 'Player A' 'Player B' [Surface] [BestOf] [Level] [YYYY-MM-DD]")
+        print(
+            "Usage: python -m src.models.predict_names "
+            "'Player A' 'Player B' [Surface] [BestOf] [Level] [YYYY-MM-DD]"
+        )
         raise SystemExit(1)
+
     name_a, name_b = sys.argv[1], sys.argv[2]
     surface = sys.argv[3] if len(sys.argv) > 3 else "Hard"
     best_of = int(sys.argv[4]) if len(sys.argv) > 4 else 3
-    level   = sys.argv[5] if len(sys.argv) > 5 else "A"
-    as_of   = sys.argv[6] if len(sys.argv) > 6 else None
-    print(json.dumps(predict_by_names(name_a, name_b, surface, best_of, level, as_of), indent=2))
+    level = sys.argv[5] if len(sys.argv) > 5 else "A"
+    as_of = sys.argv[6] if len(sys.argv) > 6 else None
+
+    print(
+        json.dumps(
+            predict_by_names(name_a, name_b, surface, best_of, level, as_of),
+            indent=2,
+        )
+    )
