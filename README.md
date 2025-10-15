@@ -1,6 +1,6 @@
 Tennis Match Predictor API
 
-This is a lightweight ML application where users select two tennis players and get a win probability, a recommended pick, and basic insights. It’s built with FastAPI, uses historical ATP match data, and applies custom engineered features (rank/age/height deltas, surface, recent form, H2H priors, Bradley–Terry feature matrix). It runs a simple ensemble of LightGBM models for stable predictions and includes a minimal UI.
+This is a lightweight ML application where users select two tennis players and get a win probability and other insights. It’s built with FastAPI, uses historical ATP match data, and applies custom engineered features (rank/age/height deltas, surface, recent form, H2H priors, Bradley–Terry feature matrix). It runs a simple ensemble of LightGBM models and is displayed using a simple UI.
 
 ---
 
@@ -29,13 +29,13 @@ Quickstart (Local)
 
 Using Docker
 
-Build the image (from repo root):
+1) Build the image (from repo root):
     docker build -t tennis-pred .
 
-Run the container (map port 8000):
+2) Run the container (map port 8000):
     docker run --rm -p 8000:8000 tennis-pred
 
-Open: http://127.0.0.1:8000/docs
+3) Open: http://127.0.0.1:8000/docs
 
 ---
 
